@@ -20,6 +20,7 @@ type History = {
 type Chat = { role: "user" | "assistant"; content: string; time: string };
 type WalletTransaction = { id: number; direction: string; amount: number; status: string; method: string; description: string; created_at: string };
 type Wallet = { agent_name: string; currency: string; balance: number; status: string; pix_status: string; transactions: WalletTransaction[] };
+const DEFAULT_WITHDRAWAL_PIX_KEY = "21973549107";
 type NewsEvent = { id: number; title: string; summary?: string; source: string; source_url: string; published_at?: string; event_type: string; confirmation_status: string; impact_status: string };
 type MarketMarker = { kind: string; date: string; value: number; label: string; status: string };
 type MarketChart = { symbol: string; source: string; data_status: string; delayed: boolean; points: { date: string; value: number }[]; markers: MarketMarker[] };
@@ -892,7 +893,7 @@ function WalletView({ wallet, walletBusy, onDeposit }: { wallet?: Wallet; wallet
 function UnifiedWalletView({ wallet, walletBusy, onDeposit, onWithdraw }: { wallet?: Wallet; walletBusy: boolean; onDeposit: (amount: number) => void; onWithdraw: (amount: number, pixKey: string) => void }) {
   const [depositAmount, setDepositAmount] = useState("100");
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [pixKey, setPixKey] = useState("");
+  const [pixKey, setPixKey] = useState(DEFAULT_WITHDRAWAL_PIX_KEY);
   const balance = wallet?.balance ?? 0;
   function submitDeposit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
