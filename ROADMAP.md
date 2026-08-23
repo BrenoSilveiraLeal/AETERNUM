@@ -18,11 +18,19 @@
 - [x] Criar contrato inicial de histórico
 - [x] Exibir gráfico demonstrativo no dashboard
 - [x] Criar contrato `MarketDataProvider` e marcar dados demo
+- [x] Remover fallbacks numéricos e exibir estados vazios verificáveis
+- [x] Preparar catálogo de fontes B3, Banco Central e IBGE
+- [x] Seed inicial reduzido a AURION; agentes antigos são arquivados
+- [x] Relógio real no fuso America/Sao_Paulo
+- [x] Ecossistema visual com holograma dedicado à AURION
 - [ ] Conectar provider oficial com credenciais server-side
 
 ## Próximas fatias
 
 - [x] Criar posições de carteira PAPER e endpoint de portfólio
+- [x] Adicionar Paper Broker mínimo com ordens simuladas
+- [x] Adicionar criação segura de agentes-filhos com limites e auditoria de relação
+- [x] Criar configuração `.env.example` sem secrets
 - [ ] CapitalAllocation, Portfolio persistente e Survival/Risk
 - [ ] TechnicalAnalysis e Backtesting com validação out-of-sample
 - [ ] Command Center read-only e audit log

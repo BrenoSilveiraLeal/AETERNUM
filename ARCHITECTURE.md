@@ -17,3 +17,7 @@ Fluxo futuro: Frontend → API → Orchestrator → Workers → providers → Po
 ## Estado atual
 
 O backend usa SQLite por simplicidade local e SQLAlchemy. O seed idempotente cria AURION e sete agentes especializados como descendentes. `MarketDataProvider` é uma fronteira explícita: o provider atual é demo, atrasado e sinalizado na resposta; adapters oficiais serão adicionados somente com credenciais e licenças válidas. A carteira atual expõe posições PAPER demonstrativas, sem persistir ordens reais.
+
+Criação de agentes-filhos exige pai existente, justificativa, objetivo, nome único e profundidade máxima. O Paper Broker valida ordens e grava apenas `SIMULATED`; não há caminho de execução real. O dashboard não possui valores de fallback: sem provider oficial ou conexão autorizada, responde com coleção vazia e mensagem de estado.
+
+O seed é idempotente e cria apenas AURION. Agentes legados encontrados no banco são marcados como `ARCHIVED`, preservando histórico sem permanecerem ativos.

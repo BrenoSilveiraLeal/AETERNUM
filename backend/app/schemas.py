@@ -41,3 +41,28 @@ class PositionOut(BaseModel):
     current_value: float
     unrealized_pnl: float
     mode: str
+
+
+class ChildAgentCreate(BaseModel):
+    name: str
+    role: str
+    specialization: str
+    objective: str
+    reason: str
+    risk_level: str = "LOW"
+
+
+class PaperOrderCreate(BaseModel):
+    symbol: str
+    side: str
+    quantity: float
+    order_type: str = "MARKET"
+    limit_price: float | None = None
+    rationale: str
+
+
+class PaperOrderOut(PaperOrderCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    status: str
+    mode: str = "PAPER"

@@ -1,13 +1,13 @@
 from datetime import date, timedelta
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import Agent, Position
-from .schemas import AgentOut, MarketHistory, MarketPoint, PositionOut
+from .models import Agent, AgentRelationship, PaperOrder, Position
+from .schemas import AgentOut, ChildAgentCreate, MarketHistory, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut
 from .seed import seed_agents
 
 Base.metadata.create_all(bind=engine)
@@ -28,17 +28,50 @@ def list_agents(db: Session = Depends(get_db)) -> list[Agent]:
     return list(db.scalars(select(Agent).order_by(Agent.id)))
 
 
+@app.post("/api/agents/{parent_id}/children", response_model=AgentOut, status_code=201)
+def create_child_agent(parent_id: int, payload: ChildAgentCreate, db: Session = Depends(get_db)) -> Agent:
+    parent = db.get(Agent, parent_id)
+    if parent is None:
+        raise HTTPException(404, "Parent agent not found")
+    if parent.generation >= 3:
+        raise HTTPException(400, "Maximum agent generation reached")
+    if not payload.reason.strip() or not payload.objective.strip():
+        raise HTTPException(422, "Reason and objective are required")
+    unique_id = "AGENT_" + payload.name.upper().replace(" ", "_")
+    if db.scalar(select(Agent).where(Agent.unique_id == unique_id)):
+        raise HTTPException(409, "Agent already exists")
+    child = Agent(unique_id=unique_id, name=payload.name, role=payload.role, specialization=payload.specialization, parent_agent_id=parent.id, generation=parent.generation + 1, status="EXPERIMENTAL", risk_level=payload.risk_level)
+    db.add(child)
+    db.flush()
+    db.add(AgentRelationship(parent_agent_id=parent.id, child_agent_id=child.id, reason=payload.reason, objective=payload.objective))
+    db.commit()
+    db.refresh(child)
+    return child
+
+
 @app.get("/api/market/history", response_model=MarketHistory)
 def market_history() -> MarketHistory:
-    # Deterministic demo contract; replace with an official server-side provider in Fase 3.
-    start = date.today() - timedelta(days=13)
-    values = [100.0, 101.4, 100.8, 102.3, 103.1, 102.7, 104.0, 105.6, 104.9, 106.2, 107.0, 106.5, 108.1, 109.4]
-    return MarketHistory(source="Demo provider", is_demo=True, data_status="DEMO DATA — fonte de mercado ainda não configurada", points=[MarketPoint(date=(start + timedelta(days=i)).isoformat(), value=value) for i, value in enumerate(values)])
+    return MarketHistory(source="", is_demo=False, data_status="Integração ainda não configurada.", points=[])
 
 
 @app.get("/api/portfolio/positions", response_model=list[PositionOut])
 def portfolio_positions(db: Session = Depends(get_db)) -> list[PositionOut]:
     positions = list(db.scalars(select(Position).order_by(Position.symbol)))
-    if not positions:
-        positions = [Position(symbol="AAPL", quantity=12, average_price=182.10, current_price=191.44), Position(symbol="NVDA", quantity=8, average_price=118.30, current_price=126.80)]
     return [PositionOut(symbol=p.symbol, quantity=p.quantity, average_price=p.average_price, current_price=p.current_price, invested_value=round(p.quantity * p.average_price, 2), current_value=round(p.quantity * p.current_price, 2), unrealized_pnl=round(p.quantity * (p.current_price - p.average_price), 2), mode="PAPER") for p in positions]
+
+
+@app.post("/api/paper/orders", response_model=PaperOrderOut, status_code=201)
+def create_paper_order(payload: PaperOrderCreate, db: Session = Depends(get_db)) -> PaperOrder:
+    side = payload.side.upper()
+    order_type = payload.order_type.upper()
+    if settings.trading_mode != "PAPER":
+        raise HTTPException(503, "Only PAPER mode is enabled")
+    if side not in {"BUY", "SELL"} or order_type not in {"MARKET", "LIMIT", "STOP", "TAKE_PROFIT"}:
+        raise HTTPException(422, "Unsupported PAPER order")
+    if payload.quantity <= 0 or (order_type == "LIMIT" and (payload.limit_price is None or payload.limit_price <= 0)):
+        raise HTTPException(422, "Quantity and price must be positive")
+    order = PaperOrder(symbol=payload.symbol.upper(), side=side, order_type=order_type, quantity=payload.quantity, limit_price=payload.limit_price, rationale=payload.rationale, status="SIMULATED")
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    return order
