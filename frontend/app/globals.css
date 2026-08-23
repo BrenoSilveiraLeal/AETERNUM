@@ -66,6 +66,8 @@
 @media(max-width:620px){.market-toolbar{display:grid}.market-toolbar .secondary-btn{width:100%;text-align:left}.chart-heading{display:grid}.chart-meta{text-align:left}.price-chart svg{min-height:190px}.chart-axis{font-size:7px}}
 .app-shell{grid-template-columns:224px minmax(0,1fr)}
 .command-panel{display:none}
+.modal select{display:block;width:100%;padding:10px;margin-top:7px;background:#0c1b29;border:1px solid var(--line);border-radius:4px;color:var(--text);font-size:11px}
+.manual-order-note{padding:11px;border:1px solid #245170;background:#0b2030;color:#b9dced;font-size:10px;line-height:1.55}
 
 /* Aurion: movimento contínuo em camadas, sem redimensionar a imagem a cada frame. */
 .survival-orb,

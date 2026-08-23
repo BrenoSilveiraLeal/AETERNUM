@@ -169,6 +169,17 @@ export default function Home() {
     setSelectedAsset(symbol);
     setModal("order");
   }
+  async function prepareManualOrder(order: { symbol: string; side: string; quantity: number; order_type: string; limit_price?: number; rationale: string }) {
+    try {
+      const response = await fetch(`${api}/api/paper/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(order) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Não foi possível preparar a ordem.");
+      setModal(null);
+      notify(`${data.side === "BUY" ? "Compra" : "Venda"} de ${data.quantity} ${data.symbol} preparada. Confirme manualmente na sua corretora.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Não foi possível preparar a ordem.");
+    }
+  }
   async function createDeposit(amount: number) {
     setWalletBusy(true);
     try {
@@ -466,10 +477,7 @@ export default function Home() {
           onConnection={() =>
             notify("Conexão segura: aguardando credenciais do provedor.")
           }
-          onOrder={() => {
-            setModal(null);
-            notify(`Simulação PAPER criada para ${selectedAsset}.`);
-          }}
+          onOrder={prepareManualOrder}
           onProposal={proposeAgent}
         />
       )}
@@ -1038,7 +1046,7 @@ function Modal({
   busy: boolean;
   onClose: () => void;
   onConnection: () => void;
-  onOrder: () => void;
+  onOrder: (order: { symbol: string; side: string; quantity: number; order_type: string; limit_price?: number; rationale: string }) => void;
   onProposal: (form: {
     name: string;
     role: string;
@@ -1049,6 +1057,9 @@ function Modal({
 }) {
   const isOrder = type === "order";
   const isProposal = type === "proposal";
+  const [orderSide, setOrderSide] = useState("BUY");
+  const [orderQuantity, setOrderQuantity] = useState("1");
+  const [orderLimit, setOrderLimit] = useState("");
   function submitProposal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1152,6 +1163,14 @@ function Modal({
               Esta ordem ficará apenas registrada como simulação. Nenhuma
               corretora ou conta bancária será acessada.
             </p>
+            <label htmlFor="order-side">
+              Operação
+              <select id="order-side" value={orderSide} onChange={(event) => setOrderSide(event.target.value)}>
+                <option value="BUY">Compra</option>
+                <option value="SELL">Venda</option>
+              </select>
+            </label>
+            <p className="manual-order-note">A Aurion prepara os dados, mas você confirma a ordem manualmente na corretora. Nenhuma senha, CAPTCHA ou 2FA é acessado.</p>
             <label htmlFor="order-quantity">
               Quantidade
               <input
@@ -1159,7 +1178,8 @@ function Modal({
                 name="quantity"
                 type="number"
                 min="1"
-                defaultValue="1"
+                value={orderQuantity}
+                onChange={(event) => setOrderQuantity(event.target.value)}
               />
             </label>
             <label htmlFor="order-limit">
@@ -1167,16 +1187,23 @@ function Modal({
               <input
                 id="order-limit"
                 name="limit"
-                placeholder="Aguardando cotação real"
-                disabled
+                inputMode="decimal"
+                value={orderLimit}
+                onChange={(event) => setOrderLimit(event.target.value)}
+                placeholder="Preço máximo/mínimo"
               />
             </label>
             <div className="modal-warning">
               ⚠ Cotações reais ainda não estão conectadas. A simulação não será
               executada.
             </div>
-            <button className="primary-btn" onClick={onOrder}>
-              Salvar simulação PAPER
+            <button className="primary-btn" onClick={() => {
+              const quantity = Number(orderQuantity);
+              const limitPrice = orderLimit ? Number(orderLimit.replace(",", ".")) : undefined;
+              if (!Number.isFinite(quantity) || quantity <= 0 || (limitPrice !== undefined && (!Number.isFinite(limitPrice) || limitPrice <= 0))) return;
+              onOrder({ symbol: asset, side: orderSide, quantity, order_type: limitPrice ? "LIMIT" : "MARKET", limit_price: limitPrice, rationale: "Preparada pela Aurion para confirmação manual do operador." });
+            }}>
+              Preparar para confirmar na corretora
             </button>
           </>
         ) : (
