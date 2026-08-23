@@ -1,0 +1,19 @@
+# Arquitetura AETERNUM
+
+## Princípios
+
+1. Sobrevivência financeira e preservação de capital vêm antes de retorno.
+2. Agentes analisam e recomendam; nenhuma análise gera ordem diretamente.
+3. PAPER é o único modo permitido durante o desenvolvimento.
+4. Ações sensíveis exigem confirmação explícita, autenticação forte e auditoria.
+5. Dados e inferências devem manter origem, timestamps e nível de confiança.
+
+## Componentes
+
+`frontend/` é uma interface web responsiva. `backend/app/` concentra domínio, API e persistência local. Workers serão processos separados quando o monitoramento contínuo for implementado; endpoints HTTP não conterão loops infinitos.
+
+Fluxo futuro: Frontend → API → Orchestrator → Workers → providers → PostgreSQL/queue.
+
+## Estado atual
+
+O backend usa SQLite por simplicidade local e SQLAlchemy. O seed idempotente cria AURION e sete agentes especializados como descendentes. `MarketDataProvider` é uma fronteira explícita: o provider atual é demo, atrasado e sinalizado na resposta; adapters oficiais serão adicionados somente com credenciais e licenças válidas. A carteira atual expõe posições PAPER demonstrativas, sem persistir ordens reais.
