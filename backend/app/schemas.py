@@ -5,11 +5,14 @@ from pydantic import BaseModel, ConfigDict
 class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     unique_id: str
+    id: int
     name: str
     role: str
     specialization: str
     parent_agent_id: int | None
     avatar: str
+    avatar_path: str
+    avatar_index: int
     status: str
     survival_state: str
     autonomy_level: str
@@ -32,6 +35,18 @@ class MarketHistory(BaseModel):
     points: list[MarketPoint]
 
 
+class MarketQuoteOut(BaseModel):
+    symbol: str
+    value: float | None
+    source: str
+    source_url: str
+    source_timestamp: datetime | None
+    collected_at: datetime
+    status: str
+    delayed: bool
+    message: str | None = None
+
+
 class PositionOut(BaseModel):
     symbol: str
     quantity: float
@@ -43,6 +58,39 @@ class PositionOut(BaseModel):
     mode: str
 
 
+class WalletTransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    direction: str
+    amount: float
+    status: str
+    method: str
+    description: str
+    created_at: datetime
+
+
+class WalletOut(BaseModel):
+    agent_unique_id: str
+    agent_name: str
+    currency: str
+    balance: float
+    status: str
+    pix_status: str
+    transactions: list[WalletTransactionOut]
+
+
+class PixDepositIntentCreate(BaseModel):
+    amount: float
+
+
+class PixDepositIntentOut(BaseModel):
+    id: int
+    amount: float
+    status: str
+    pix_status: str
+    message: str
+
+
 class ChildAgentCreate(BaseModel):
     name: str
     role: str
@@ -50,6 +98,15 @@ class ChildAgentCreate(BaseModel):
     objective: str
     reason: str
     risk_level: str = "LOW"
+
+
+class AgentProposalOut(ChildAgentCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    parent_agent_id: int
+    status: str
+    created_at: datetime
+    decided_at: datetime | None = None
 
 
 class PaperOrderCreate(BaseModel):
@@ -65,4 +122,20 @@ class PaperOrderOut(PaperOrderCreate):
     model_config = ConfigDict(from_attributes=True)
     id: int
     status: str
+    filled_price: float | None = None
+    executed_at: datetime | None = None
     mode: str = "PAPER"
+
+
+class ChatRequest(BaseModel):
+    message: str
+    conversation_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    message: str
+    created_at: datetime
+    display_time: str
+    sources: list[str]
+    actions: list[str]

@@ -37,6 +37,8 @@ Configuração: copie `.env.example` para `.env` no backend. Providers oficiais 
 
 O relógio da interface usa `America/Sao_Paulo`; timestamps persistidos no backend devem permanecer em UTC e ser convertidos apenas na apresentação.
 
+Os avatares fornecidos estão catalogados em `frontend/app/agentAvatars.ts` e armazenados individualmente em `frontend/public/avatars/`. A primeira integração usa composição `screen` para neutralizar visualmente os fundos escuros; a migração para PNG/WebP com alpha real permanece uma etapa de otimização de arte.
+
 ## Segurança
 
 `TRADING_MODE` permanece `PAPER` por padrão. Segredos devem ficar no ambiente do servidor; nunca no frontend ou no repositório.

@@ -18,3 +18,11 @@ class BancoCentralProvider:
 
 class IBGEProvider:
     source = OfficialSource("IBGE", "SIDRA", "NOT_CONFIGURED")
+
+
+class CVMOfficialProvider:
+    source = OfficialSource("CVM Dados Abertos", "https://dados.cvm.gov.br/dados/", "PUBLIC_CATALOG")
+
+
+class OfficialEventsCatalog:
+    source = OfficialSource("Catálogo de fontes oficiais", "https://www.gov.br/", "CATALOG_ONLY")

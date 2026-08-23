@@ -12,7 +12,7 @@
 
 `frontend/` é uma interface web responsiva. `backend/app/` concentra domínio, API e persistência local. Workers serão processos separados quando o monitoramento contínuo for implementado; endpoints HTTP não conterão loops infinitos.
 
-Fluxo futuro: Frontend → API → Orchestrator → Workers → providers → PostgreSQL/queue.
+Fluxo futuro: Frontend → API → Orchestrator → Workers → providers → PostgreSQL/queue. O provider inicial de mercado é `DadosDeMercadoProvider`; seus dados só entram no produto quando há token, valor, timestamp e origem válidos.
 
 ## Estado atual
 
@@ -21,3 +21,5 @@ O backend usa SQLite por simplicidade local e SQLAlchemy. O seed idempotente cri
 Criação de agentes-filhos exige pai existente, justificativa, objetivo, nome único e profundidade máxima. O Paper Broker valida ordens e grava apenas `SIMULATED`; não há caminho de execução real. O dashboard não possui valores de fallback: sem provider oficial ou conexão autorizada, responde com coleção vazia e mensagem de estado.
 
 O seed é idempotente e cria apenas AURION. Agentes legados encontrados no banco são marcados como `ARCHIVED`, preservando histórico sem permanecerem ativos.
+
+Avatares são assets individuais, catalogados no frontend e referenciados no agente por `avatar_path`/`avatar_index`. A primeira camada visual usa composição 2.5D com `mix-blend-mode: screen`, evitando cenários retangulares; WebGL fica opcional para a fase de múltiplos agentes.

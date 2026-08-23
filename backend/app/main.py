@@ -1,14 +1,25 @@
-from datetime import date, timedelta
-from fastapi import Depends, FastAPI, HTTPException
+from datetime import date, datetime, timedelta, timezone
+import json
+from uuid import uuid4
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import Agent, AgentRelationship, PaperOrder, Position
-from .schemas import AgentOut, ChildAgentCreate, MarketHistory, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut
+from .models import Agent, AgentProposal, AgentRelationship, AuditLog, ChatMessage, MarketQuote, NewsEvent, PaperOrder, Position, WalletAccount, WalletTransaction
+from .schemas import AgentOut, AgentProposalOut, ChatRequest, ChatResponse, ChildAgentCreate, MarketHistory, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut, PixDepositIntentCreate, PixDepositIntentOut, WalletOut, WalletTransactionOut
+from .services.ai_service import AIService
+from .providers.market_data import ProviderNotConfigured, ProviderUnavailable, get_market_provider
 from .seed import seed_agents
+from .services.paper_broker import PaperExecutionError, execute_order
+from .providers.macro import BancoCentralSGSProvider
+from .providers.ibge import IBGESIDRAProvider
+from .providers.cvm_provider import CVMProvider
+from .news_provider import get_news_provider
+from .providers.events.event_classifier import classify
+from .providers.events.official_sources import OFFICIAL_SOURCES
 
 Base.metadata.create_all(bind=engine)
 with next(get_db()) as db:
@@ -18,14 +29,116 @@ app = FastAPI(title=settings.app_name, version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_methods=["*"], allow_headers=["*"])
 
 
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["x-request-id"] = request_id
+    return response
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "trading_mode": settings.trading_mode}
+    return {"status": "ok", "trading_mode": settings.trading_mode, "market_provider": settings.market_data_provider}
+
+
+@app.get("/api/integrations/status")
+def integration_status() -> list[dict[str, str]]:
+    return [
+        {"name": "Dados de Mercado", "status": "CONFIGURED" if (settings.market_data_api_token or settings.market_data_api_key) else "NOT_CONFIGURED", "scope": "market"},
+        {"name": "Banco Central SGS", "status": "PUBLIC_ADAPTER", "scope": "macro"},
+        {"name": "IBGE SIDRA", "status": "PUBLIC_ADAPTER", "scope": "macro"},
+        {"name": "CVM Dados Abertos", "status": "PUBLIC_CATALOG", "scope": "events"},
+        {"name": "Open Finance", "status": "NOT_CONFIGURED", "scope": "finance"},
+        {"name": "B3 licenciada", "status": "DISABLED", "scope": "market"},
+    ]
+
+
+@app.get("/api/news/status")
+def news_status() -> dict[str, object]:
+    configured = bool(settings.news_api_key and settings.news_provider != "unconfigured")
+    return {"configured": configured, "provider": settings.news_provider if configured else "unconfigured", "poll_interval_seconds": settings.news_poll_interval_seconds, "official_sources": len(OFFICIAL_SOURCES), "message": "Atualização automática disponível após configurar um provedor autorizado." if configured else "Nenhum provedor autorizado configurado; o sistema não inventa notícias."}
+
+
+@app.get("/api/news/sources")
+def news_sources() -> list[dict[str, str]]:
+    return OFFICIAL_SOURCES
+
+
+@app.get("/api/news/events")
+def news_events(limit: int = 50, db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    bounded_limit = min(max(limit, 1), 200)
+    rows = list(db.scalars(select(NewsEvent).order_by(NewsEvent.published_at.desc(), NewsEvent.collected_at.desc()).limit(bounded_limit)))
+    return [{"id": row.id, "title": row.title, "summary": row.summary, "source": row.source, "source_url": row.source_url, "published_at": row.published_at.isoformat() if row.published_at else None, "event_type": row.event_type, "confirmation_status": row.confirmation_status, "confidence": row.confidence, "impact_status": "SCENARIO_ONLY"} for row in rows]
+
+
+@app.post("/api/news/sync")
+def sync_news(request: Request, db: Session = Depends(get_db)) -> dict[str, object]:
+    try:
+        articles = get_news_provider().search("bolsa OR economia OR política OR guerra OR desastre OR juros")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    inserted = 0
+    for article in articles:
+        title = str(article.get("title", "")).strip()
+        url = str(article.get("url", "")).strip()
+        if not title or not url or db.scalar(select(NewsEvent).where(NewsEvent.source_url == url)):
+            continue
+        published = article.get("publishedAt")
+        published_at = datetime.fromisoformat(str(published).replace("Z", "+00:00")) if published else None
+        source_name = str((article.get("source") or {}).get("name") or "Provedor autorizado")
+        db.add(NewsEvent(title=title, summary=article.get("description"), source=source_name, source_url=url, published_at=published_at, event_type=classify(title), confirmation_status="UNCONFIRMED", confidence=None))
+        inserted += 1
+    db.add(AuditLog(action="NEWS_SYNC", actor="system", request_id=request.state.request_id, result="COMPLETED"))
+    db.commit()
+    return {"status": "AVAILABLE", "inserted": inserted, "total_received": len(articles), "message": "Eventos armazenados com fonte e horário; impacto permanece como cenário para análise."}
+
+
+@app.get("/api/sources/cvm")
+def cvm_sources() -> list[dict[str, str]]:
+    return CVMProvider().available_datasets()
+
+
+@app.get("/api/macro/bcb/{code}")
+def bcb_series(code: int, start: date | None = None, end: date | None = None) -> dict:
+    start_date = start or (date.today() - timedelta(days=30))
+    end_date = end or date.today()
+    if start_date > end_date or (end_date - start_date).days > 3660:
+        raise HTTPException(422, "Intervalo inválido; use no máximo dez anos")
+    try:
+        records = BancoCentralSGSProvider().get_series(code, start_date, end_date)
+    except RuntimeError as exc:
+        return {"code": code, "status": "UNAVAILABLE", "source": "Banco Central SGS", "data": [], "message": str(exc)}
+    return {"code": code, "status": "AVAILABLE", "source": records[0].source if records else "Banco Central SGS", "source_url": records[0].source_url if records else "", "data": [{"date": row.reference_date.isoformat(), "value": row.value} for row in records]}
+
+
+@app.get("/api/macro/ibge/{table}/{variable}/{period}")
+def ibge_values(table: str, variable: str, period: str) -> dict:
+    if not all(part.replace("-", "").isalnum() for part in (table, variable, period)):
+        raise HTTPException(422, "Parâmetros SIDRA inválidos")
+    try:
+        values = IBGESIDRAProvider().get_values(table, variable, period)
+    except RuntimeError as exc:
+        return {"status": "UNAVAILABLE", "source": "IBGE SIDRA", "data": [], "message": str(exc)}
+    return {"status": "AVAILABLE", "source": "IBGE SIDRA", "data": values}
+
+
+@app.get("/api/audit/logs")
+def audit_logs(limit: int = 50, db: Session = Depends(get_db)) -> list[dict[str, str | None]]:
+    bounded_limit = min(max(limit, 1), 200)
+    rows = list(db.scalars(select(AuditLog).order_by(AuditLog.created_at.desc()).limit(bounded_limit)))
+    return [{"action": row.action, "actor": row.actor, "request_id": row.request_id, "result": row.result, "created_at": row.created_at.isoformat()} for row in rows]
 
 
 @app.get("/api/agents", response_model=list[AgentOut])
 def list_agents(db: Session = Depends(get_db)) -> list[Agent]:
-    return list(db.scalars(select(Agent).order_by(Agent.id)))
+    return list(db.scalars(select(Agent).where(Agent.status == "ACTIVE").order_by(Agent.id)))
+
+
+@app.get("/api/agents/archived", response_model=list[AgentOut])
+def archived_agents(db: Session = Depends(get_db)) -> list[Agent]:
+    return list(db.scalars(select(Agent).where(Agent.status == "ARCHIVED").order_by(Agent.id)))
 
 
 @app.post("/api/agents/{parent_id}/children", response_model=AgentOut, status_code=201)
@@ -49,9 +162,62 @@ def create_child_agent(parent_id: int, payload: ChildAgentCreate, db: Session = 
     return child
 
 
+@app.post("/api/agents/{parent_id}/proposals", response_model=AgentProposalOut, status_code=201)
+def propose_child_agent(parent_id: int, payload: ChildAgentCreate, db: Session = Depends(get_db)) -> AgentProposal:
+    parent = db.get(Agent, parent_id)
+    if parent is None:
+        raise HTTPException(404, "Parent agent not found")
+    if parent.generation >= 3:
+        raise HTTPException(400, "Maximum agent generation reached")
+    if not payload.reason.strip() or not payload.objective.strip():
+        raise HTTPException(422, "Reason and objective are required")
+    proposal = AgentProposal(parent_agent_id=parent.id, name=payload.name.strip(), role=payload.role.strip(), specialization=payload.specialization.strip(), objective=payload.objective.strip(), reason=payload.reason.strip(), risk_level=payload.risk_level.upper())
+    db.add(proposal)
+    db.add(AuditLog(action="AGENT_PROPOSAL_CREATED", actor="operator", result="PENDING"))
+    db.commit()
+    db.refresh(proposal)
+    return proposal
+
+
+@app.get("/api/agents/proposals", response_model=list[AgentProposalOut])
+def list_agent_proposals(db: Session = Depends(get_db)) -> list[AgentProposal]:
+    return list(db.scalars(select(AgentProposal).order_by(AgentProposal.created_at.desc())))
+
+
+@app.post("/api/agents/proposals/{proposal_id}/approve", response_model=AgentOut)
+def approve_agent_proposal(proposal_id: int, request: Request, db: Session = Depends(get_db)) -> Agent:
+    proposal = db.get(AgentProposal, proposal_id)
+    if proposal is None:
+        raise HTTPException(404, "Proposal not found")
+    if proposal.status != "PENDING":
+        raise HTTPException(409, "Proposal already decided")
+    unique_id = "AGENT_" + proposal.name.upper().replace(" ", "_")
+    if db.scalar(select(Agent).where(Agent.unique_id == unique_id)):
+        raise HTTPException(409, "Agent already exists")
+    parent = db.get(Agent, proposal.parent_agent_id)
+    if parent is None:
+        raise HTTPException(409, "Parent agent no longer exists")
+    child = Agent(unique_id=unique_id, name=proposal.name, role=proposal.role, specialization=proposal.specialization, parent_agent_id=parent.id, generation=parent.generation + 1, status="EXPERIMENTAL", risk_level=proposal.risk_level)
+    db.add(child)
+    db.flush()
+    db.add(AgentRelationship(parent_agent_id=parent.id, child_agent_id=child.id, reason=proposal.reason, objective=proposal.objective))
+    proposal.status = "APPROVED"
+    proposal.decided_at = datetime.now(timezone.utc)
+    db.add(AuditLog(action="AGENT_PROPOSAL_APPROVED", actor="operator", request_id=request.state.request_id, result="APPROVED"))
+    db.commit()
+    db.refresh(child)
+    return child
+
+
 @app.get("/api/market/history", response_model=MarketHistory)
 def market_history() -> MarketHistory:
-    return MarketHistory(source="", is_demo=False, data_status="Integração ainda não configurada.", points=[])
+    try:
+        records = get_market_provider().get_history("IBOV", date.today() - timedelta(days=30), date.today())
+        return MarketHistory(source=records[0].source, is_demo=False, data_status="Dado histórico", points=[MarketPoint(date=record.source_timestamp.date().isoformat(), value=record.value) for record in records])
+    except ProviderNotConfigured:
+        return MarketHistory(source="", is_demo=False, data_status="Integração ainda não configurada.", points=[])
+    except ProviderUnavailable as exc:
+        return MarketHistory(source="", is_demo=False, data_status=str(exc), points=[])
 
 
 @app.get("/api/portfolio/positions", response_model=list[PositionOut])
@@ -60,8 +226,42 @@ def portfolio_positions(db: Session = Depends(get_db)) -> list[PositionOut]:
     return [PositionOut(symbol=p.symbol, quantity=p.quantity, average_price=p.average_price, current_price=p.current_price, invested_value=round(p.quantity * p.average_price, 2), current_value=round(p.quantity * p.current_price, 2), unrealized_pnl=round(p.quantity * (p.current_price - p.average_price), 2), mode="PAPER") for p in positions]
 
 
+def get_or_create_aurion_wallet(db: Session) -> tuple[Agent, WalletAccount]:
+    aurion = db.scalar(select(Agent).where(Agent.unique_id == "AURION"))
+    if aurion is None:
+        raise HTTPException(503, "Aurion ainda não foi inicializada")
+    wallet = db.scalar(select(WalletAccount).where(WalletAccount.agent_id == aurion.id))
+    if wallet is None:
+        wallet = WalletAccount(agent_id=aurion.id)
+        db.add(wallet)
+        db.commit()
+        db.refresh(wallet)
+    return aurion, wallet
+
+
+@app.get("/api/wallet/aurion", response_model=WalletOut)
+def aurion_wallet(db: Session = Depends(get_db)) -> WalletOut:
+    aurion, wallet = get_or_create_aurion_wallet(db)
+    transactions = list(db.scalars(select(WalletTransaction).where(WalletTransaction.wallet_id == wallet.id).order_by(WalletTransaction.created_at.desc()).limit(30)))
+    return WalletOut(agent_unique_id=aurion.unique_id, agent_name=aurion.name, currency=wallet.currency, balance=float(wallet.balance or 0), status=wallet.status, pix_status="NOT_CONFIGURED", transactions=[WalletTransactionOut(id=row.id, direction=row.direction, amount=float(row.amount), status=row.status, method=row.method, description=row.description, created_at=row.created_at) for row in transactions])
+
+
+@app.post("/api/wallet/aurion/deposit-intents", response_model=PixDepositIntentOut, status_code=201)
+def create_pix_deposit_intent(payload: PixDepositIntentCreate, request: Request, db: Session = Depends(get_db)) -> PixDepositIntentOut:
+    if payload.amount <= 0 or payload.amount > 1_000_000:
+        raise HTTPException(422, "O valor deve estar entre R$ 0,01 e R$ 1.000.000,00")
+    _, wallet = get_or_create_aurion_wallet(db)
+    reference = f"PIX_PENDING_{uuid4()}"
+    transaction = WalletTransaction(wallet_id=wallet.id, direction="CREDIT", amount=round(payload.amount, 2), status="PENDING_PROVIDER", method="PIX", provider_reference=reference, description="Aguardando confirmação do provedor Pix")
+    db.add(transaction)
+    db.add(AuditLog(action="PIX_DEPOSIT_INTENT_CREATED", actor="operator", request_id=request.state.request_id, result="PENDING_PROVIDER"))
+    db.commit()
+    db.refresh(transaction)
+    return PixDepositIntentOut(id=transaction.id, amount=float(transaction.amount), status=transaction.status, pix_status="NOT_CONFIGURED", message="Intenção registrada, mas nenhum provedor Pix está conectado. O saldo só será creditado após confirmação por webhook.")
+
+
 @app.post("/api/paper/orders", response_model=PaperOrderOut, status_code=201)
-def create_paper_order(payload: PaperOrderCreate, db: Session = Depends(get_db)) -> PaperOrder:
+def create_paper_order(payload: PaperOrderCreate, request: Request, db: Session = Depends(get_db)) -> PaperOrder:
     side = payload.side.upper()
     order_type = payload.order_type.upper()
     if settings.trading_mode != "PAPER":
@@ -72,6 +272,53 @@ def create_paper_order(payload: PaperOrderCreate, db: Session = Depends(get_db))
         raise HTTPException(422, "Quantity and price must be positive")
     order = PaperOrder(symbol=payload.symbol.upper(), side=side, order_type=order_type, quantity=payload.quantity, limit_price=payload.limit_price, rationale=payload.rationale, status="SIMULATED")
     db.add(order)
+    db.add(AuditLog(action="PAPER_ORDER_CREATED", actor="operator", request_id=request.state.request_id, result="ACCEPTED"))
     db.commit()
     db.refresh(order)
     return order
+
+
+@app.get("/api/paper/orders", response_model=list[PaperOrderOut])
+def list_paper_orders(db: Session = Depends(get_db)) -> list[PaperOrder]:
+    return list(db.scalars(select(PaperOrder).order_by(PaperOrder.created_at.desc())))
+
+
+@app.post("/api/paper/orders/{order_id}/execute", response_model=PaperOrderOut)
+def execute_paper_order(order_id: int, request: Request, db: Session = Depends(get_db)) -> PaperOrder:
+    order = db.get(PaperOrder, order_id)
+    if order is None:
+        raise HTTPException(404, "PAPER order not found")
+    try:
+        execute_order(db, order)
+    except PaperExecutionError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    db.add(AuditLog(action="PAPER_ORDER_FILLED", actor="operator", request_id=request.state.request_id, result="FILLED"))
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest, request: Request, db: Session = Depends(get_db)) -> ChatResponse:
+    if not payload.message.strip():
+        raise HTTPException(422, "A mensagem não pode estar vazia")
+    service = AIService(db)
+    conversation_id, answer, model = service.respond(payload.message.strip(), payload.conversation_id)
+    created_at = datetime.now(timezone.utc)
+    db.add(ChatMessage(conversation_id=conversation_id, role="user", content=payload.message.strip(), model=model))
+    db.add(ChatMessage(conversation_id=conversation_id, role="assistant", content=answer, model=model))
+    db.add(AuditLog(action="AURION_CHAT", actor="operator", request_id=request.state.request_id, result="COMPLETED"))
+    db.commit()
+    return ChatResponse(conversation_id=conversation_id, message=answer, created_at=created_at, display_time=created_at.astimezone().isoformat(), sources=[], actions=[])
+
+
+@app.get("/api/market/quote/{symbol}")
+def market_quote(symbol: str, db: Session = Depends(get_db)):
+    try:
+        record = get_market_provider().get_quote(symbol)
+        db.add(MarketQuote(provider=record.provider, symbol=record.symbol, value=record.value, source_timestamp=record.source_timestamp, status=record.status, raw_json=json.dumps(record.raw, default=str)))
+        db.commit()
+        return {"symbol": record.symbol, "value": record.value, "source": record.source, "source_url": record.source_url, "source_timestamp": record.source_timestamp, "collected_at": record.collected_at, "status": record.status, "delayed": record.delayed}
+    except (ProviderNotConfigured, ProviderUnavailable) as exc:
+        return {"symbol": symbol.upper(), "value": None, "source": "", "source_url": "", "source_timestamp": None, "collected_at": datetime.now(timezone.utc), "status": "UNAVAILABLE", "delayed": False, "message": str(exc)}

@@ -23,6 +23,10 @@
 - [x] Seed inicial reduzido a AURION; agentes antigos são arquivados
 - [x] Relógio real no fuso America/Sao_Paulo
 - [x] Ecossistema visual com holograma dedicado à AURION
+- [x] Catalogar oito avatares individuais fornecidos
+- [x] Integrar avatar da AURION com fallback 2.5D responsivo
+- [ ] Extrair alpha real e migrar assets para WebP otimizado
+- [ ] Adicionar cena Three.js/React Three Fiber quando houver necessidade de múltiplos agentes ativos
 - [ ] Conectar provider oficial com credenciais server-side
 
 ## Próximas fatias
