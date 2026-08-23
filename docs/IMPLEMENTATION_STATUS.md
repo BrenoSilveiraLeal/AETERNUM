@@ -2,6 +2,10 @@
 
 ## Entregue
 
+- A interface não exibe mais o chat de comandos; alterações de produto permanecem no fluxo de desenvolvimento pelo VS Code.
+- A carteira operacional é compartilhada pelo ecossistema: depósitos e solicitações de retirada usam o mesmo saldo, preservando uma reserva mínima de sobrevivência.
+- Retiradas Pix são registradas como intenções pendentes e não movimentam dinheiro enquanto um provedor autorizado e seu webhook não estiverem configurados.
+
 - AURION é o único agente ativo inicial; agentes antigos permanecem arquivados.
 - O modo de operação está travado em `PAPER`; não há execução de ordens reais.
 - O painel e o chat usam estados vazios quando não existe fonte verificável.
@@ -37,3 +41,4 @@ npm run build
 - CatÃ¡logo de fontes oficiais e endpoints de eventos/sincronizaÃ§Ã£o foram adicionados.
 - A sincronizaÃ§Ã£o via NewsAPI Ã© opcional e exige `NEWS_PROVIDER=newsapi` e `NEWS_API_KEY` no backend.
 - Eventos guardam fonte, URL e horÃ¡rio; impacto financeiro permanece como cenÃ¡rio, nunca previsÃ£o garantida.
+- O modo gratuito tambÃ©m aceita `NEWS_PROVIDER=rss`, usando feeds pÃºblicos oficiais configurados em `NEWS_RSS_URLS`, sem chave paga; a cobertura nÃ£o equivale a um feed profissional de mercado.

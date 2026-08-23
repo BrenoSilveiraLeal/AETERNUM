@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 import json
+from email.utils import parsedate_to_datetime
 from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, engine, get_db
 from .models import Agent, AgentProposal, AgentRelationship, AuditLog, ChatMessage, MarketQuote, NewsEvent, PaperOrder, Position, WalletAccount, WalletTransaction
-from .schemas import AgentOut, AgentProposalOut, ChatRequest, ChatResponse, ChildAgentCreate, MarketHistory, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut, PixDepositIntentCreate, PixDepositIntentOut, WalletOut, WalletTransactionOut
+from .schemas import AgentOut, AgentProposalOut, ChatRequest, ChatResponse, ChildAgentCreate, MarketChartOut, MarketHistory, MarketMarker, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut, PixDepositIntentCreate, PixDepositIntentOut, PixWithdrawalIntentCreate, PixWithdrawalIntentOut, WalletOut, WalletTransactionOut
 from .services.ai_service import AIService
 from .providers.market_data import ProviderNotConfigured, ProviderUnavailable, get_market_provider
 from .seed import seed_agents
@@ -45,8 +46,9 @@ def health() -> dict[str, str]:
 
 @app.get("/api/integrations/status")
 def integration_status() -> list[dict[str, str]]:
+    market_configured = settings.market_data_provider == "brapi" or bool(settings.market_data_api_token or settings.market_data_api_key)
     return [
-        {"name": "Dados de Mercado", "status": "CONFIGURED" if (settings.market_data_api_token or settings.market_data_api_key) else "NOT_CONFIGURED", "scope": "market"},
+        {"name": "brapi.dev / Dados de Mercado", "status": "CONFIGURED" if market_configured else "NOT_CONFIGURED", "scope": "market"},
         {"name": "Banco Central SGS", "status": "PUBLIC_ADAPTER", "scope": "macro"},
         {"name": "IBGE SIDRA", "status": "PUBLIC_ADAPTER", "scope": "macro"},
         {"name": "CVM Dados Abertos", "status": "PUBLIC_CATALOG", "scope": "events"},
@@ -57,7 +59,7 @@ def integration_status() -> list[dict[str, str]]:
 
 @app.get("/api/news/status")
 def news_status() -> dict[str, object]:
-    configured = bool(settings.news_api_key and settings.news_provider != "unconfigured")
+    configured = settings.news_provider.casefold() == "rss" or bool(settings.news_api_key and settings.news_provider != "unconfigured")
     return {"configured": configured, "provider": settings.news_provider if configured else "unconfigured", "poll_interval_seconds": settings.news_poll_interval_seconds, "official_sources": len(OFFICIAL_SOURCES), "message": "Atualização automática disponível após configurar um provedor autorizado." if configured else "Nenhum provedor autorizado configurado; o sistema não inventa notícias."}
 
 
@@ -86,7 +88,13 @@ def sync_news(request: Request, db: Session = Depends(get_db)) -> dict[str, obje
         if not title or not url or db.scalar(select(NewsEvent).where(NewsEvent.source_url == url)):
             continue
         published = article.get("publishedAt")
-        published_at = datetime.fromisoformat(str(published).replace("Z", "+00:00")) if published else None
+        if published:
+            try:
+                published_at = datetime.fromisoformat(str(published).replace("Z", "+00:00"))
+            except ValueError:
+                published_at = parsedate_to_datetime(str(published))
+        else:
+            published_at = None
         source_name = str((article.get("source") or {}).get("name") or "Provedor autorizado")
         db.add(NewsEvent(title=title, summary=article.get("description"), source=source_name, source_url=url, published_at=published_at, event_type=classify(title), confirmation_status="UNCONFIRMED", confidence=None))
         inserted += 1
@@ -220,6 +228,32 @@ def market_history() -> MarketHistory:
         return MarketHistory(source="", is_demo=False, data_status=str(exc), points=[])
 
 
+@app.get("/api/market/chart/{symbol}", response_model=MarketChartOut)
+def market_chart(symbol: str, days: int = 365, db: Session = Depends(get_db)) -> MarketChartOut:
+    normalized = symbol.upper().strip()
+    bounded_days = min(max(days, 1), 3650)
+    try:
+        records = get_market_provider().get_history(normalized, date.today() - timedelta(days=bounded_days), date.today())
+        points = [MarketPoint(date=record.source_timestamp.isoformat(), value=record.value) for record in records]
+        source = records[0].source if records else ""
+        delayed = any(record.delayed for record in records)
+    except ProviderNotConfigured:
+        return MarketChartOut(symbol=normalized, source="", data_status="Integração ainda não configurada.", delayed=False, points=[], markers=[])
+    except ProviderUnavailable as exc:
+        return MarketChartOut(symbol=normalized, source="", data_status=str(exc), delayed=False, points=[], markers=[])
+    orders = list(db.scalars(select(PaperOrder).where(PaperOrder.symbol == normalized).order_by(PaperOrder.created_at)))
+    markers: list[MarketMarker] = []
+    for order in orders:
+        marker_value = order.filled_price or order.limit_price
+        if marker_value is None:
+            continue
+        kind = f"{order.side}_{'EXECUTED' if order.status == 'FILLED' else 'PENDING'}"
+        label = "Compra executada" if order.side == "BUY" and order.status == "FILLED" else "Venda executada" if order.side == "SELL" and order.status == "FILLED" else "Compra planejada" if order.side == "BUY" else "Venda planejada"
+        marker_date = (order.executed_at or order.created_at).isoformat()
+        markers.append(MarketMarker(kind=kind, date=marker_date, value=float(marker_value), label=label, status=order.status))
+    return MarketChartOut(symbol=normalized, source=source, data_status="Histórico recebido do provedor", delayed=delayed, points=points, markers=markers)
+
+
 @app.get("/api/portfolio/positions", response_model=list[PositionOut])
 def portfolio_positions(db: Session = Depends(get_db)) -> list[PositionOut]:
     positions = list(db.scalars(select(Position).order_by(Position.symbol)))
@@ -239,11 +273,12 @@ def get_or_create_aurion_wallet(db: Session) -> tuple[Agent, WalletAccount]:
     return aurion, wallet
 
 
+@app.get("/api/wallet/ecosystem", response_model=WalletOut)
 @app.get("/api/wallet/aurion", response_model=WalletOut)
-def aurion_wallet(db: Session = Depends(get_db)) -> WalletOut:
+def ecosystem_wallet(db: Session = Depends(get_db)) -> WalletOut:
     aurion, wallet = get_or_create_aurion_wallet(db)
     transactions = list(db.scalars(select(WalletTransaction).where(WalletTransaction.wallet_id == wallet.id).order_by(WalletTransaction.created_at.desc()).limit(30)))
-    return WalletOut(agent_unique_id=aurion.unique_id, agent_name=aurion.name, currency=wallet.currency, balance=float(wallet.balance or 0), status=wallet.status, pix_status="NOT_CONFIGURED", transactions=[WalletTransactionOut(id=row.id, direction=row.direction, amount=float(row.amount), status=row.status, method=row.method, description=row.description, created_at=row.created_at) for row in transactions])
+    return WalletOut(agent_unique_id="AETERNUM_ECOSYSTEM", agent_name="Carteira do ecossistema", currency=wallet.currency, balance=float(wallet.balance or 0), status=wallet.status, pix_status="NOT_CONFIGURED", transactions=[WalletTransactionOut(id=row.id, direction=row.direction, amount=float(row.amount), status=row.status, method=row.method, description=row.description, created_at=row.created_at) for row in transactions])
 
 
 @app.post("/api/wallet/aurion/deposit-intents", response_model=PixDepositIntentOut, status_code=201)
@@ -258,6 +293,28 @@ def create_pix_deposit_intent(payload: PixDepositIntentCreate, request: Request,
     db.commit()
     db.refresh(transaction)
     return PixDepositIntentOut(id=transaction.id, amount=float(transaction.amount), status=transaction.status, pix_status="NOT_CONFIGURED", message="Intenção registrada, mas nenhum provedor Pix está conectado. O saldo só será creditado após confirmação por webhook.")
+
+
+@app.post("/api/wallet/ecosystem/withdrawal-intents", response_model=PixWithdrawalIntentOut, status_code=201)
+def create_pix_withdrawal_intent(payload: PixWithdrawalIntentCreate, request: Request, db: Session = Depends(get_db)) -> PixWithdrawalIntentOut:
+    if payload.amount <= 0 or payload.amount > 1_000_000:
+        raise HTTPException(422, "O valor deve estar entre R$ 0,01 e R$ 1.000.000,00")
+    pix_key = payload.pix_key.strip()
+    if len(pix_key) < 5 or len(pix_key) > 140:
+        raise HTTPException(422, "Informe uma chave Pix válida")
+    _, wallet = get_or_create_aurion_wallet(db)
+    pending_debits = sum(float(row.amount or 0) for row in db.scalars(select(WalletTransaction).where(WalletTransaction.wallet_id == wallet.id, WalletTransaction.direction == "DEBIT", WalletTransaction.status == "PENDING_PROVIDER")))
+    available = float(wallet.balance or 0) - pending_debits
+    minimum_reserve = 0.01
+    if payload.amount > max(0, available - minimum_reserve):
+        raise HTTPException(409, "A retirada ultrapassa o saldo disponível e preservaria a reserva mínima de sobrevivência da carteira")
+    reference = f"PIX_WITHDRAWAL_PENDING_{uuid4()}"
+    transaction = WalletTransaction(wallet_id=wallet.id, direction="DEBIT", amount=round(payload.amount, 2), status="PENDING_PROVIDER", method="PIX", provider_reference=reference, description="Retirada solicitada; aguardando confirmação do provedor Pix")
+    db.add(transaction)
+    db.add(AuditLog(action="PIX_WITHDRAWAL_INTENT_CREATED", actor="operator", request_id=request.state.request_id, result="PENDING_PROVIDER"))
+    db.commit()
+    db.refresh(transaction)
+    return PixWithdrawalIntentOut(id=transaction.id, amount=float(transaction.amount), status=transaction.status, pix_status="NOT_CONFIGURED", message="Retirada registrada, mas nenhum provedor Pix está conectado. Nenhum valor foi enviado.")
 
 
 @app.post("/api/paper/orders", response_model=PaperOrderOut, status_code=201)

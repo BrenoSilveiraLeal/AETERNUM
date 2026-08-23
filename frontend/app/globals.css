@@ -60,5 +60,115 @@
 @keyframes depth-particles-visible{0%,100%{transform:translate3d(1px,0,20px) scale(1);opacity:.18}29%{transform:translate3d(-3px,2px,29px) scale(1.07);opacity:.42}57%{transform:translate3d(4px,-1px,23px) scale(.98);opacity:.23}84%{transform:translate3d(-1px,-3px,32px) scale(1.05);opacity:.46}}
 .wallet-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.75fr);gap:14px;margin-top:28px}.wallet-hero,.deposit-card,.wallet-transactions{padding:22px}.wallet-heading{display:flex;justify-content:space-between;gap:14px}.wallet-heading h3,.deposit-card h3{font-size:20px;margin:8px 0}.wallet-heading p,.deposit-card>p{color:var(--muted);font-size:10px;line-height:1.6;margin:0}.wallet-status{border:1px solid #2f607c;border-radius:20px;height:max-content;padding:7px 9px;color:var(--lime);font:8px 'DM Mono';white-space:nowrap}.wallet-status i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);box-shadow:0 0 8px var(--teal);margin-right:5px}.wallet-balance{border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin:26px 0 18px;padding:18px 0}.wallet-balance strong{display:block;font-size:37px;letter-spacing:-.06em;margin:10px 0 5px}.wallet-balance small{color:var(--muted);font:9px 'DM Mono'}.wallet-warning{display:flex;align-items:flex-start;gap:11px;border:1px solid #6b512b;background:#241d12;border-radius:6px;padding:13px}.wallet-warning>span{display:grid;place-items:center;width:19px;height:19px;border:1px solid var(--amber);border-radius:50%;color:var(--amber);font:11px 'DM Mono'}.wallet-warning strong{font-size:10px;color:var(--amber)}.wallet-warning p{color:#c4b39a;font-size:9px;line-height:1.55;margin:5px 0 0}.deposit-card form{margin-top:22px}.deposit-card label{display:grid;gap:7px;color:var(--muted);font:9px 'DM Mono'}.deposit-card input{width:100%;box-sizing:border-box;background:#0c1b29;border:1px solid #1c3b50;border-radius:5px;color:var(--text);padding:12px;font:12px Manrope;outline:none}.deposit-card input:focus{border-color:var(--teal)}.deposit-card .primary-btn{width:100%;margin-top:12px;text-align:left}.primary-btn span{float:right;color:var(--bg)}.deposit-note{display:block;color:var(--faint);font:8px 'DM Mono';line-height:1.55;margin-top:16px}.wallet-transactions{grid-column:1/-1}.wallet-transaction{display:flex;align-items:center;gap:11px;border-top:1px solid var(--line);padding:13px 0}.transaction-icon{display:grid;place-items:center;width:28px;height:28px;border:1px solid #2d627d;border-radius:50%;color:var(--teal)}.wallet-transaction strong,.wallet-transaction small{display:block}.wallet-transaction strong{font-size:10px}.wallet-transaction small{color:var(--muted);font:8px 'DM Mono';margin-top:4px}.transaction-pending{margin-left:auto;color:var(--amber);font:8px 'DM Mono'}
 .signals-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr);gap:14px;margin-top:28px}.signals-feed,.news-rules{padding:22px}.source-ready{color:var(--teal);font:9px 'DM Mono';border-bottom:1px solid var(--line);padding:15px 0;margin:10px 0 0}.source-ready i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);box-shadow:0 0 8px var(--teal);margin-right:6px}.signals-config-warning{border:1px solid #6b512b;background:#241d12;border-radius:6px;padding:13px;margin-top:22px}.signals-config-warning strong{color:var(--amber);font-size:10px}.signals-config-warning p{color:#c4b39a;font-size:9px;line-height:1.55;margin:6px 0 0}.news-event{display:block;border-top:1px solid var(--line);padding:15px 0;color:inherit;text-decoration:none}.news-event:hover strong{color:var(--teal)}.news-event-type{display:inline-block;color:var(--lime);font:8px 'DM Mono';border:1px solid #2f607c;border-radius:20px;padding:4px 7px;margin-bottom:8px}.news-event strong,.news-event small,.news-event p{display:block}.news-event strong{font-size:12px;line-height:1.4}.news-event small{color:var(--muted);font:8px 'DM Mono';margin-top:6px}.news-event p{color:var(--muted);font-size:9px;line-height:1.5;margin:7px 0 0}.news-rules h3{font-size:17px;margin:9px 0 21px}.news-rules .footnote{margin-top:18px}.signals-feed .text-btn{cursor:pointer}
+.market-toolbar{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-top:28px;margin-bottom:14px}.symbol-tabs{display:flex;gap:5px;overflow:auto}.symbol-tabs button{border:1px solid var(--line);background:#0c1b29;color:var(--muted);border-radius:5px;padding:9px 12px;font:9px 'DM Mono'}.symbol-tabs button:hover,.symbol-tabs button.active{border-color:#4b9ac0;color:var(--text);background:#123149}.chart-card{padding:22px}.chart-heading{display:flex;justify-content:space-between;gap:15px;align-items:flex-start}.chart-heading h3{font-size:24px;margin:8px 0}.chart-meta{display:grid;gap:7px;text-align:right;color:var(--muted);font:8px 'DM Mono'}.chart-meta b{color:var(--teal);font-weight:400}.price-chart{margin-top:20px;border-top:1px solid var(--line);padding-top:16px;overflow:hidden}.price-chart svg{display:block;width:100%;height:auto;min-height:250px;background:linear-gradient(180deg,#0c1e2c55,transparent);border-radius:5px}.chart-marker line{stroke:#e5c08b66;stroke-width:1;stroke-dasharray:3 4}.chart-marker circle{fill:#e5c08b;stroke:#07111d;stroke-width:2}.chart-marker.buy_executed circle{fill:#62cfff}.chart-marker.sell_executed circle{fill:#f28d9d}.chart-marker.buy_pending circle,.chart-marker.sell_pending circle{fill:#e5c08b}.chart-axis{display:flex;justify-content:space-between;color:var(--faint);font:8px 'DM Mono';padding-top:9px}.chart-legend{display:flex;flex-wrap:wrap;gap:13px;border-top:1px solid var(--line);margin-top:14px;padding-top:13px;color:var(--muted);font:8px 'DM Mono'}.chart-legend span{display:flex;align-items:center;gap:5px}.legend-line{display:inline-block;width:15px;height:2px;background:var(--teal)}.legend-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber)}.legend-dot.buy{background:var(--teal)}.legend-dot.sell{background:#f28d9d}
 @media(max-width:820px){.wallet-layout{grid-template-columns:1fr}.wallet-transactions{grid-column:auto}.wallet-balance strong{font-size:31px}}
 @media(max-width:820px){.signals-layout{grid-template-columns:1fr}}
+@media(max-width:620px){.market-toolbar{display:grid}.market-toolbar .secondary-btn{width:100%;text-align:left}.chart-heading{display:grid}.chart-meta{text-align:left}.price-chart svg{min-height:190px}.chart-axis{font-size:7px}}
+.app-shell{grid-template-columns:224px minmax(0,1fr)}
+.command-panel{display:none}
+
+/* Aurion: movimento contínuo em camadas, sem redimensionar a imagem a cada frame. */
+.survival-orb,
+.core {
+  animation: none;
+  background-position: center, 50% 50%;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.survival-orb > span,
+.core span {
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  animation: aurion-fluid-body 12s cubic-bezier(.37,.05,.25,1) infinite;
+  animation-play-state: running;
+}
+
+.core span {
+  animation-duration: 10.5s;
+}
+
+.survival-orb > span::after,
+.core span::after {
+  will-change: transform, opacity;
+  animation: aurion-fluid-depth 14s cubic-bezier(.37,.05,.25,1) infinite;
+}
+
+.core span::after {
+  animation-duration: 8.5s;
+}
+
+.survival-orb::before,
+.survival-orb::after {
+  will-change: transform, opacity;
+  animation: aurion-hologram-shell 24s cubic-bezier(.37,.05,.25,1) infinite;
+}
+
+.survival-orb::after {
+  animation-delay: -8s;
+  animation-duration: 31s;
+  animation-name: aurion-hologram-shell-reverse;
+}
+
+.orb-ring {
+  will-change: transform;
+  animation: orbit-occasional-fluid 46s cubic-bezier(.25,.1,.25,1) infinite;
+}
+
+.ring-two {
+  animation: orbit-occasional-fluid-reverse 59s cubic-bezier(.25,.1,.25,1) infinite;
+}
+
+@keyframes aurion-fluid-body {
+  0%, 100% { transform: translate3d(-3px, 1px, 8px) rotateZ(-1deg) rotateY(-2deg) scale(.98); opacity: .24; }
+  23% { transform: translate3d(4px, -3px, 15px) rotateZ(.8deg) rotateY(3deg) scale(1.035); opacity: .48; }
+  47% { transform: translate3d(-5px, 3px, 10px) rotateX(2deg) rotateZ(-.6deg) scale(.99); opacity: .31; }
+  71% { transform: translate3d(5px, 2px, 20px) rotateY(-3deg) rotateZ(1deg) scale(1.045); opacity: .52; }
+}
+
+@keyframes aurion-fluid-depth {
+  0%, 100% { transform: translate3d(2px, -1px, 22px) scale(.98); opacity: .18; }
+  31% { transform: translate3d(-4px, 3px, 29px) scale(1.06); opacity: .45; }
+  63% { transform: translate3d(5px, -3px, 24px) scale(.96); opacity: .22; }
+  86% { transform: translate3d(-3px, 2px, 33px) scale(1.07); opacity: .5; }
+}
+
+@keyframes aurion-hologram-shell {
+  0%, 100% { transform: rotate(42deg) scale(.98); opacity: .68; }
+  27% { transform: rotate(46deg) scale(1.04); opacity: .92; }
+  54% { transform: rotate(39deg) scale(.97); opacity: .62; }
+  79% { transform: rotate(44deg) scale(1.06); opacity: .82; }
+}
+
+@keyframes aurion-hologram-shell-reverse {
+  0%, 100% { transform: rotate(-35deg) scale(1); opacity: .62; }
+  31% { transform: rotate(-31deg) scale(1.05); opacity: .86; }
+  63% { transform: rotate(-38deg) scale(.96); opacity: .58; }
+  88% { transform: rotate(-33deg) scale(1.04); opacity: .78; }
+}
+
+@keyframes orbit-occasional-fluid {
+  0%, 66% { transform: rotate(0deg); }
+  77% { transform: rotate(20deg); }
+  88% { transform: rotate(170deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes orbit-occasional-fluid-reverse {
+  0%, 70% { transform: rotate(0deg); }
+  81% { transform: rotate(-18deg); }
+  91% { transform: rotate(-165deg); }
+  100% { transform: rotate(-360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .survival-orb,
+  .core,
+  .survival-orb > span,
+  .core span,
+  .survival-orb > span::after,
+  .core span::after,
+  .orb-ring {
+    animation: none !important;
+  }
+}

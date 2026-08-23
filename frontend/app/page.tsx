@@ -21,6 +21,8 @@ type Chat = { role: "user" | "assistant"; content: string; time: string };
 type WalletTransaction = { id: number; direction: string; amount: number; status: string; method: string; description: string; created_at: string };
 type Wallet = { agent_name: string; currency: string; balance: number; status: string; pix_status: string; transactions: WalletTransaction[] };
 type NewsEvent = { id: number; title: string; summary?: string; source: string; source_url: string; published_at?: string; event_type: string; confirmation_status: string; impact_status: string };
+type MarketMarker = { kind: string; date: string; value: number; label: string; status: string };
+type MarketChart = { symbol: string; source: string; data_status: string; delayed: boolean; points: { date: string; value: number }[]; markers: MarketMarker[] };
 
 const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const watchlist = [
@@ -49,6 +51,8 @@ export default function Home() {
   const [walletBusy, setWalletBusy] = useState(false);
   const [newsEvents, setNewsEvents] = useState<NewsEvent[]>([]);
   const [newsConfigured, setNewsConfigured] = useState(false);
+  const [marketSymbol, setMarketSymbol] = useState("PETR4");
+  const [marketChart, setMarketChart] = useState<MarketChart>();
   useEffect(() => {
     setNow(new Date());
     const clock = window.setInterval(() => setNow(new Date()), 1000);
@@ -69,6 +73,21 @@ export default function Home() {
       .catch(() => undefined);
     return () => window.clearInterval(clock);
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadChart() {
+      try {
+        const response = await fetch(`${api}/api/market/chart/${encodeURIComponent(marketSymbol)}?days=3650`);
+        const data = await response.json();
+        if (!cancelled) setMarketChart(data);
+      } catch {
+        if (!cancelled) setMarketChart({ symbol: marketSymbol, source: "", data_status: "Fonte indisponível.", delayed: false, points: [], markers: [] });
+      }
+    }
+    loadChart();
+    const refresh = window.setInterval(loadChart, 30000);
+    return () => { cancelled = true; window.clearInterval(refresh); };
+  }, [marketSymbol]);
   const time = new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -159,6 +178,20 @@ export default function Home() {
       notify(data.message);
     } catch (error) {
       notify(error instanceof Error ? error.message : "Não foi possível iniciar o depósito.");
+    } finally {
+      setWalletBusy(false);
+    }
+  }
+  async function createWithdrawal(amount: number, pixKey: string) {
+    setWalletBusy(true);
+    try {
+      const response = await fetch(`${api}/api/wallet/ecosystem/withdrawal-intents`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, pix_key: pixKey }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail ?? "Não foi possível solicitar a retirada.");
+      setWallet((current) => current ? { ...current, transactions: [{ id: data.id, direction: "DEBIT", amount: data.amount, status: data.status, method: "PIX", description: data.message, created_at: new Date().toISOString() }, ...current.transactions] } : current);
+      notify(data.message);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Não foi possível solicitar a retirada.");
     } finally {
       setWalletBusy(false);
     }
@@ -348,13 +381,17 @@ export default function Home() {
             wallet={wallet}
             walletBusy={walletBusy}
             onDeposit={createDeposit}
+            onWithdraw={createWithdrawal}
             newsEvents={newsEvents}
             newsConfigured={newsConfigured}
             onNewsSync={syncNews}
+            marketSymbol={marketSymbol}
+            marketChart={marketChart}
+            onMarketSymbol={setMarketSymbol}
           />
         )}
       </section>
-      <aside className="command-panel">
+      {false && <aside className="command-panel">
         <div className="command-top">
           <div className="command-title">
             <span className="aurion-mini">✦</span>
@@ -418,7 +455,7 @@ export default function Home() {
             Enter para enviar · comandos financeiros exigem confirmação
           </small>
         </form>
-      </aside>
+      </aside>}
       {modal && (
         <Modal
           type={modal}
@@ -693,9 +730,13 @@ function DetailView({
   wallet,
   walletBusy,
   onDeposit,
+  onWithdraw,
   newsEvents,
   newsConfigured,
   onNewsSync,
+  marketSymbol,
+  marketChart,
+  onMarketSymbol,
 }: {
   active: string;
   agents: Agent[];
@@ -707,9 +748,13 @@ function DetailView({
   wallet?: Wallet;
   walletBusy: boolean;
   onDeposit: (amount: number) => void;
+  onWithdraw: (amount: number, pixKey: string) => void;
   newsEvents: NewsEvent[];
   newsConfigured: boolean;
   onNewsSync: () => void;
+  marketSymbol: string;
+  marketChart?: MarketChart;
+  onMarketSymbol: (symbol: string) => void;
 }) {
   const title =
     active === "agents"
@@ -742,9 +787,11 @@ function DetailView({
       {active === "agents" ? (
         <EvolutionView agents={agents} onPropose={onPropose} />
       ) : active === "portfolio" ? (
-        <WalletView wallet={wallet} walletBusy={walletBusy} onDeposit={onDeposit} />
+        <UnifiedWalletView wallet={wallet} walletBusy={walletBusy} onDeposit={onDeposit} onWithdraw={onWithdraw} />
       ) : active === "signals" ? (
         <SignalsView events={newsEvents} configured={newsConfigured} onSync={onNewsSync} />
+      ) : active === "market" ? (
+        <MarketView symbol={marketSymbol} chart={marketChart ?? { symbol: marketSymbol, source: "", data_status: "Aguardando fonte de mercado.", delayed: false, points: [], markers: [] }} onSymbolChange={onMarketSymbol} onOrder={onOrder} />
       ) : (
         <div className="detail-grid">
           <article className="panel-card detail-main">
@@ -797,6 +844,28 @@ function DetailView({
   );
 }
 
+function MarketView({ symbol, chart, onSymbolChange, onOrder }: { symbol: string; chart: MarketChart; onSymbolChange: (symbol: string) => void; onOrder: (symbol: string) => void }) {
+  const symbols = ["PETR4", "VALE3", "ITUB4", "AAPL", "ETHUSD"];
+  const points = chart?.points ?? [];
+  const values = points.map((point) => point.value);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  const range = max - min || 1;
+  const width = 800;
+  const height = 300;
+  const xForIndex = (index: number) => 20 + (index / Math.max(points.length - 1, 1)) * 760;
+  const yForValue = (value: number) => 270 - ((value - min) / range) * 240;
+  const line = points.map((point, index) => `${xForIndex(index)},${yForValue(point.value)}`).join(" ");
+  function xForDate(date: string) {
+    if (!points.length) return 20;
+    const start = new Date(points[0].date).getTime();
+    const end = new Date(points[points.length - 1].date).getTime();
+    const ratio = end > start ? (new Date(date).getTime() - start) / (end - start) : 1;
+    return 20 + Math.max(0, Math.min(1, ratio)) * 760;
+  }
+  return <div className="market-terminal"><div className="market-toolbar"><div className="symbol-tabs">{symbols.map((item) => <button className={item === symbol ? "active" : ""} key={item} onClick={() => onSymbolChange(item)}>{item}</button>)}</div><button className="secondary-btn" onClick={() => onOrder(symbol)}>Preparar ordem PAPER <span>→</span></button></div><article className="panel-card chart-card"><div className="chart-heading"><div><span className="section-kicker">HISTÓRICO DE PREÇOS · ATÉ 10 ANOS</span><h3>{symbol}</h3></div><div className="chart-meta"><span>{chart?.source || "Fonte não conectada"}</span><b>{chart?.delayed ? "ATRASADO" : "AO VIVO QUANDO DISPONÍVEL"}</b></div></div>{points.length ? <div className="price-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Gráfico histórico de ${symbol}`}><defs><linearGradient id="chart-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#62cfff" stopOpacity=".22" /><stop offset="100%" stopColor="#62cfff" stopOpacity="0" /></linearGradient></defs><polyline points={`${line} 780,270 20,270`} fill="url(#chart-fill)" stroke="none" /><polyline points={line} fill="none" stroke="#62cfff" strokeWidth="2" vectorEffect="non-scaling-stroke" />{chart.markers.map((marker) => <g key={`${marker.kind}-${marker.date}`} className={`chart-marker ${marker.kind.toLowerCase()}`}><line x1={xForDate(marker.date)} x2={xForDate(marker.date)} y1="20" y2="270" /><circle cx={xForDate(marker.date)} cy={yForValue(marker.value)} r="5" /><title>{marker.label} · R$ {marker.value.toFixed(2)}</title></g>)}</svg><div className="chart-axis"><span>{new Date(points[0].date).toLocaleDateString("pt-BR")}</span><span>R$ {max.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span><span>R$ {min.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span><span>{new Date(points[points.length - 1].date).toLocaleDateString("pt-BR")}</span></div></div> : <div className="empty-state large"><div className="empty-icon">◒</div><strong>Histórico indisponível</strong><p>{chart?.data_status ?? "Aguardando fonte de mercado."} Conecte um provedor autorizado para visualizar preços reais e atualizações.</p></div>}<div className="chart-legend"><span><i className="legend-line" /> preço histórico</span><span><i className="legend-dot buy" /> compra</span><span><i className="legend-dot sell" /> venda</span><span><i className="legend-dot planned" /> intenção</span></div></article></div>;
+}
+
 function SignalsView({ events, configured, onSync }: { events: NewsEvent[]; configured: boolean; onSync: () => void }) {
   return <div className="signals-layout"><article className="panel-card signals-feed"><div className="card-heading"><div><span className="section-kicker">RADAR GLOBAL</span><h2>Eventos monitorados</h2></div><button className="text-btn" onClick={onSync}>Sincronizar <span>↻</span></button></div>{configured ? <p className="source-ready"><i /> Provedor autorizado conectado · atualização conforme intervalo configurado</p> : <div className="signals-config-warning"><strong>Fontes em modo catálogo</strong><p>O sistema conhece as fontes oficiais, mas ainda não tem uma API licenciada conectada para receber notícias ao vivo.</p></div>}{events.length ? events.map((event) => <a className="news-event" href={event.source_url} target="_blank" rel="noreferrer" key={event.id}><span className="news-event-type">{event.event_type}</span><strong>{event.title}</strong><small>{event.source} · {event.published_at ? new Date(event.published_at).toLocaleString("pt-BR") : "horário não informado"}</small><p>{event.summary ?? "Sem resumo fornecido pela fonte."}</p></a>) : <div className="empty-state large"><div className="empty-icon">⌁</div><strong>Nenhum evento recebido</strong><p>Configure um provedor autorizado para alimentar este radar. Nenhum evento demonstrativo é exibido.</p></div>}</article><aside className="panel-card news-rules"><span className="section-kicker">ANÁLISE DE IMPACTO</span><h3>Como a Aurion usa as notícias</h3><div className="rule"><span>Classificação temática</span><b>ativa</b></div><div className="rule"><span>Impacto no ativo</span><b>cenário</b></div><div className="rule"><span>Compra automática</span><b>bloqueada</b></div><p className="footnote">Uma manchete política ou pesquisa eleitoral pode alterar expectativas, mas não determina sozinha o preço de uma ação. Cada sinal precisa de fonte, contexto, confirmação e dados de mercado.</p></aside></div>;
 }
@@ -817,6 +886,33 @@ function WalletView({ wallet, walletBusy, onDeposit }: { wallet?: Wallet; wallet
     </article>
     <aside className="panel-card deposit-card"><span className="section-kicker">ADICIONAR CAPITAL</span><h3>Enviar via Pix</h3><p>Informe quanto pretende depositar para gerar um pedido rastreável.</p><form onSubmit={submit}><label htmlFor="pix-amount">Valor do depósito<input id="pix-amount" name="amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="100,00" /></label><button className="primary-btn" disabled={walletBusy || !amount}>{walletBusy ? "Registrando…" : "Criar intenção Pix"}<span>→</span></button></form><small className="deposit-note">Não use uma chave Pix pessoal como se fosse a carteira. Precisamos conectar um provedor de pagamentos para gerar o QR Code e confirmar automaticamente.</small></aside>
     <article className="panel-card wallet-transactions"><div className="card-heading"><div><span className="section-kicker">MOVIMENTAÇÕES</span><h2>Histórico da carteira</h2></div><span className="count-badge">{wallet?.transactions.length ?? 0}</span></div>{wallet?.transactions.length ? wallet.transactions.map((transaction) => <div className="wallet-transaction" key={transaction.id}><span className="transaction-icon">↗</span><div><strong>Pix · R$ {transaction.amount.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong><small>{transaction.description}</small></div><b className="transaction-pending">{transaction.status === "PENDING_PROVIDER" ? "PENDENTE" : transaction.status}</b></div>) : <div className="empty-state"><div className="empty-icon">▣</div><strong>Nenhum depósito confirmado</strong><p>Os depósitos e créditos confirmados aparecerão aqui.</p></div>}</article>
+  </div>;
+}
+
+function UnifiedWalletView({ wallet, walletBusy, onDeposit, onWithdraw }: { wallet?: Wallet; walletBusy: boolean; onDeposit: (amount: number) => void; onWithdraw: (amount: number, pixKey: string) => void }) {
+  const [depositAmount, setDepositAmount] = useState("100");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [pixKey, setPixKey] = useState("");
+  const balance = wallet?.balance ?? 0;
+  function submitDeposit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = Number(depositAmount.replace(",", "."));
+    if (Number.isFinite(value) && value > 0) onDeposit(value);
+  }
+  function submitWithdrawal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const value = Number(withdrawAmount.replace(",", "."));
+    if (Number.isFinite(value) && value > 0 && pixKey.trim()) onWithdraw(value, pixKey.trim());
+  }
+  return <div className="wallet-layout">
+    <article className="panel-card wallet-hero">
+      <div className="wallet-heading"><div><span className="section-kicker">CARTEIRA DO ECOSSISTEMA</span><h3>Capital compartilhado</h3><p>Aurion e futuras IAs dependem deste mesmo saldo para investir e sobreviver.</p></div><span className="wallet-status"><i /> {wallet?.status ?? "CARREGANDO"}</span></div>
+      <div className="wallet-balance"><span className="section-kicker">SALDO ÚNICO DISPONÍVEL</span><strong>R$ {balance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong><small>BRL · retiradas preservam uma reserva mínima de sobrevivência</small></div>
+      <div className="wallet-warning"><span>!</span><div><strong>Pix em modo pendente</strong><p>Depósitos e retiradas só alteram o saldo após confirmação de um provedor Pix autorizado.</p></div></div>
+    </article>
+    <aside className="panel-card deposit-card"><span className="section-kicker">ENTRADA DE CAPITAL</span><h3>Adicionar via Pix</h3><p>Crie uma solicitação rastreável para depositar na carteira única.</p><form onSubmit={submitDeposit}><label htmlFor="pix-deposit-amount">Valor do depósito<input id="pix-deposit-amount" inputMode="decimal" value={depositAmount} onChange={(event) => setDepositAmount(event.target.value)} placeholder="100,00" /></label><button className="primary-btn" disabled={walletBusy || !depositAmount}>{walletBusy ? "Registrando…" : "Solicitar depósito"}<span>→</span></button></form><small className="deposit-note">Nenhum saldo é inventado: sem webhook confirmado, a solicitação fica pendente.</small></aside>
+    <aside className="panel-card deposit-card"><span className="section-kicker">SAÍDA DE CAPITAL</span><h3>Solicitar retirada</h3><p>Informe o valor e a chave Pix de destino. O envio real depende do provedor.</p><form onSubmit={submitWithdrawal}><label htmlFor="pix-withdraw-amount">Valor da retirada<input id="pix-withdraw-amount" inputMode="decimal" value={withdrawAmount} onChange={(event) => setWithdrawAmount(event.target.value)} placeholder="100,00" /></label><label htmlFor="pix-destination-key">Chave Pix de destino<input id="pix-destination-key" value={pixKey} onChange={(event) => setPixKey(event.target.value)} placeholder="Digite a chave Pix" autoComplete="off" /></label><button className="secondary-btn" disabled={walletBusy || !withdrawAmount || !pixKey.trim()}>{walletBusy ? "Registrando…" : "Solicitar retirada"}<span>→</span></button></form><small className="deposit-note">A chave não fica exposta na interface. Nenhum valor será enviado enquanto o Pix não estiver conectado.</small></aside>
+    <article className="panel-card wallet-transactions"><div className="card-heading"><div><span className="section-kicker">MOVIMENTAÇÕES DA CARTEIRA ÚNICA</span><h2>Histórico financeiro</h2></div><span className="count-badge">{wallet?.transactions.length ?? 0}</span></div>{wallet?.transactions.length ? wallet.transactions.map((transaction) => <div className="wallet-transaction" key={transaction.id}><span className="transaction-icon">{transaction.direction === "DEBIT" ? "↙" : "↗"}</span><div><strong>{transaction.direction === "DEBIT" ? "Retirada" : "Depósito"} · R$ {transaction.amount.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</strong><small>{transaction.description}</small></div><b className="transaction-pending">{transaction.status === "PENDING_PROVIDER" ? "PENDENTE" : transaction.status}</b></div>) : <div className="empty-state"><div className="empty-icon">▣</div><strong>Nenhuma movimentação confirmada</strong><p>Depósitos e retiradas aparecerão aqui com seus respectivos estados.</p></div>}</article>
   </div>;
 }
 

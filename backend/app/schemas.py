@@ -35,6 +35,23 @@ class MarketHistory(BaseModel):
     points: list[MarketPoint]
 
 
+class MarketMarker(BaseModel):
+    kind: str
+    date: str
+    value: float
+    label: str
+    status: str
+
+
+class MarketChartOut(BaseModel):
+    symbol: str
+    source: str
+    data_status: str
+    delayed: bool
+    points: list[MarketPoint]
+    markers: list[MarketMarker]
+
+
 class MarketQuoteOut(BaseModel):
     symbol: str
     value: float | None
@@ -84,6 +101,19 @@ class PixDepositIntentCreate(BaseModel):
 
 
 class PixDepositIntentOut(BaseModel):
+    id: int
+    amount: float
+    status: str
+    pix_status: str
+    message: str
+
+
+class PixWithdrawalIntentCreate(BaseModel):
+    amount: float
+    pix_key: str
+
+
+class PixWithdrawalIntentOut(BaseModel):
     id: int
     amount: float
     status: str
