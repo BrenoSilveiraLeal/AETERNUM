@@ -43,3 +43,20 @@
 - [ ] PWA, deploy cloud e hardening de segurança
 
 > LIVE, PIX, saques reais e movimentação financeira permanecem desativados até existir uma revisão e autorização explícitas.
+## MetaTrader 5 / Rico
+
+- [x] Criar ponte opcional em modo somente leitura
+- [x] Adicionar proteÃ§Ãµes PAPER/DEMO e status seguro no dashboard
+- [x] Preparar `MetaTraderMarketDataProvider`
+- [x] Criar sinais persistidos, alocaÃ§Ãµes internas e RiskManager
+- [x] Criar ExecutionEngine PAPER com bloqueio de cotaÃ§Ã£o e auditoria
+- [x] Criar diagnÃ³stico local `python -m app.tools.mt5_doctor`
+- [ ] Validar conta demo Rico localmente e mapear sÃ­mbolos B3
+- [ ] Criar RiskManager + ExecutionEngine antes de qualquer ordem demo
+## Hardening do nÃºcleo
+
+- [x] Injetar `BrokerAdapter` no ExecutionEngine
+- [x] Adicionar reserva configurÃ¡vel e endpoint de alocaÃ§Ãµes
+- [ ] Implementar reconciliaÃ§Ã£o PAPER/DEMO e idempotÃªncia de execuÃ§Ã£o
+- [ ] Implementar autenticaÃ§Ã£o forte e aprovaÃ§Ã£o operacional para habilitar DEMO
+- [ ] Somente depois: revisÃ£o independente para eventual trading real

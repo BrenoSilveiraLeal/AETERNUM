@@ -157,6 +157,57 @@ class PaperOrderOut(PaperOrderCreate):
     mode: str = "PAPER"
 
 
+class TradingSignalCreate(BaseModel):
+    agent_id: int
+    symbol: str
+    action: str
+    confidence: float
+    reason: str
+    risk: str = "MEDIUM"
+    entry_min: float | None = None
+    entry_max: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    position_size: float
+    expires_at: datetime | None = None
+
+
+class TradingSignalOut(TradingSignalCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    status: str
+    created_at: datetime
+
+
+class RiskDecisionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    signal_id: int
+    approved: bool
+    reason: str
+    requested_notional: float
+    allowed_notional: float
+    created_at: datetime
+
+
+class ExecutionRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    signal_id: int
+    mode: str
+    broker: str
+    status: str
+    paper_order_id: int | None
+    error: str | None
+    created_at: datetime
+
+
+class AllocationUpdate(BaseModel):
+    allocation_percent: float
+    max_position_percent: float = 10
+    enabled: bool = True
+
+
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None

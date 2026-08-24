@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     ai_api_key: str | None = None
     ai_provider: str = "gemini"
     ai_model: str = "gemini-3.5-flash-lite"
+    mt5_terminal_path: str | None = None
+    mt5_login: int | None = None
+    mt5_server: str | None = None
+    mt5_password: str | None = None
+    mt5_timeout_ms: int = 5000
+    mt5_demo_only: bool = True
+    mt5_allowed_demo_servers: str = "demo,practice,contest"
+    risk_reserve_percent: float = 20
     model_config = SettingsConfigDict(env_file=("backend/.env", ".env"), extra="ignore")
 
 

@@ -24,6 +24,8 @@ const DEFAULT_WITHDRAWAL_PIX_KEY = "21973549107";
 type NewsEvent = { id: number; title: string; summary?: string; source: string; source_url: string; published_at?: string; event_type: string; confirmation_status: string; impact_status: string };
 type MarketMarker = { kind: string; date: string; value: number; label: string; status: string };
 type MarketChart = { symbol: string; source: string; data_status: string; delayed: boolean; points: { date: string; value: number }[]; markers: MarketMarker[] };
+type BrokerStatus = { connected: boolean; terminal: string; market_data: string; environment: string; broker: string; account?: { login_masked?: string; server?: string | null; permitted_demo?: boolean } | null; last_sync?: string | null; message: string };
+type Signal = { id: number; symbol: string; action: string; confidence: number; reason: string; risk: string; position_size: number; status: string; created_at: string };
 
 const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const watchlist = [
@@ -54,6 +56,8 @@ export default function Home() {
   const [newsConfigured, setNewsConfigured] = useState(false);
   const [marketSymbol, setMarketSymbol] = useState("PETR4");
   const [marketChart, setMarketChart] = useState<MarketChart>();
+  const [brokerStatus, setBrokerStatus] = useState<BrokerStatus>();
+  const [signals, setSignals] = useState<Signal[]>([]);
   useEffect(() => {
     setNow(new Date());
     const clock = window.setInterval(() => setNow(new Date()), 1000);
@@ -63,13 +67,17 @@ export default function Home() {
       fetch(`${api}/api/wallet/aurion`).then((r) => r.json()),
       fetch(`${api}/api/news/events`).then((r) => r.json()),
       fetch(`${api}/api/news/status`).then((r) => r.json()),
+      fetch(`${api}/api/broker/connection`).then((r) => r.json()),
+      fetch(`${api}/api/signals?limit=5`).then((r) => r.json()),
     ])
-      .then(([a, h, w, n, ns]) => {
+      .then(([a, h, w, n, ns, broker, latestSignals]) => {
         setAgents(a);
         setHistory(h);
         setWallet(w);
         setNewsEvents(Array.isArray(n) ? n : []);
         setNewsConfigured(Boolean(ns.configured));
+        setBrokerStatus(broker);
+        setSignals(Array.isArray(latestSignals) ? latestSignals : []);
       })
       .catch(() => undefined);
     return () => window.clearInterval(clock);
@@ -380,6 +388,8 @@ export default function Home() {
             onNavigate={setActive}
             onConnection={() => setModal("connection")}
             onOrder={openOrder}
+            brokerStatus={brokerStatus}
+            signals={signals}
           />
         ) : (
           <DetailView
@@ -496,12 +506,16 @@ function Overview({
   onNavigate,
   onConnection,
   onOrder,
+  brokerStatus,
+  signals,
 }: {
   agents: Agent[];
   history?: History;
   onNavigate: (v: string) => void;
   onConnection: () => void;
   onOrder: (symbol: string) => void;
+  brokerStatus?: BrokerStatus;
+  signals: Signal[];
 }) {
   return (
     <>
@@ -593,6 +607,38 @@ function Overview({
           detail="Modo protegido"
           accent="lime"
         />
+      </section>
+      <section className="panel-card broker-connection-card">
+        <div className="card-heading">
+          <div>
+            <span className="section-kicker">BROKER CONNECTION</span>
+            <h2>MetaTrader 5 <span className="broker-provider">· {brokerStatus?.broker ?? "Rico"}</span></h2>
+          </div>
+          <span className={`status-pill ${brokerStatus?.connected && brokerStatus.account?.permitted_demo ? "status-ok" : "status-offline"}`}>
+            <i /> {brokerStatus?.connected && brokerStatus.account?.permitted_demo ? "CONNECTED" : "DISCONNECTED"}
+          </span>
+        </div>
+        <div className="broker-grid">
+          <div><span>Environment</span><strong>{brokerStatus?.environment ?? "PAPER / DEMO"}</strong></div>
+          <div><span>Account</span><strong>{brokerStatus?.account?.login_masked ?? "Not available"}</strong></div>
+          <div><span>Terminal</span><strong>{brokerStatus?.terminal ?? "OFFLINE"}</strong></div>
+          <div><span>Market data</span><strong>{brokerStatus?.market_data ?? "UNAVAILABLE"}</strong></div>
+          <div><span>Last sync</span><strong>{brokerStatus?.last_sync ? new Date(brokerStatus.last_sync).toLocaleTimeString("pt-BR") : "Not available"}</strong></div>
+        </div>
+        <p className="broker-note">{brokerStatus?.message ?? "Verificando terminal local…"}</p>
+      </section>
+      <section className="panel-card signal-rail-card">
+        <div className="card-heading">
+          <div><span className="section-kicker">DECISION ENGINE</span><h2>Sinais recentes</h2></div>
+          <span className="count-badge">{signals.length}</span>
+        </div>
+        {signals.length ? signals.map((signal) => (
+          <div className="signal-rail-row" key={signal.id}>
+            <span className={`signal-action ${signal.action.toLowerCase()}`}>{signal.action}</span>
+            <div><strong>{signal.symbol} · {Math.round(signal.confidence * 100)}% confiança</strong><small>{signal.reason}</small></div>
+            <span className="signal-status">{signal.status}</span>
+          </div>
+        )) : <p className="broker-note">Nenhum sinal recebido. AURION pode analisar, mas toda decisão continua sujeita ao RiskManager.</p>}
       </section>
       <section className="content-grid">
         <article className="panel-card market-card">

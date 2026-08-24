@@ -6,3 +6,4 @@ pydantic-settings>=2.0,<3
 pytest>=8,<9
 httpx2>=0.1
 google-genai>=1.0,<2
+MetaTrader5>=5.0.0,<6

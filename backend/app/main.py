@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import Base, engine, get_db
-from .models import Agent, AgentProposal, AgentRelationship, AuditLog, ChatMessage, MarketQuote, NewsEvent, PaperOrder, Position, WalletAccount, WalletTransaction
-from .schemas import AgentOut, AgentProposalOut, ChatRequest, ChatResponse, ChildAgentCreate, MarketChartOut, MarketHistory, MarketMarker, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut, PixDepositIntentCreate, PixDepositIntentOut, PixWithdrawalIntentCreate, PixWithdrawalIntentOut, WalletOut, WalletTransactionOut
+from .models import Agent, AgentAllocation, AgentProposal, AgentRelationship, AuditLog, ChatMessage, ExecutionRecord, MarketQuote, NewsEvent, PaperOrder, Position, RiskDecision, TradingSignal, WalletAccount, WalletTransaction
+from .schemas import AgentOut, AgentProposalOut, AllocationUpdate, ChatRequest, ChatResponse, ChildAgentCreate, ExecutionRecordOut, MarketChartOut, MarketHistory, MarketMarker, MarketPoint, PaperOrderCreate, PaperOrderOut, PositionOut, PixDepositIntentCreate, PixDepositIntentOut, PixWithdrawalIntentCreate, PixWithdrawalIntentOut, RiskDecisionOut, TradingSignalCreate, TradingSignalOut, WalletOut, WalletTransactionOut
 from .services.ai_service import AIService
 from .providers.market_data import ProviderNotConfigured, ProviderUnavailable, get_market_provider
 from .seed import seed_agents
@@ -21,6 +21,8 @@ from .providers.cvm_provider import CVMProvider
 from .news_provider import get_news_provider
 from .providers.events.event_classifier import classify
 from .providers.events.official_sources import OFFICIAL_SOURCES
+from .broker.registry import get_mt5_broker
+from .services.execution_engine import ExecutionEngine
 
 Base.metadata.create_all(bind=engine)
 with next(get_db()) as db:
@@ -54,7 +56,14 @@ def integration_status() -> list[dict[str, str]]:
         {"name": "CVM Dados Abertos", "status": "PUBLIC_CATALOG", "scope": "events"},
         {"name": "Open Finance", "status": "NOT_CONFIGURED", "scope": "finance"},
         {"name": "B3 licenciada", "status": "DISABLED", "scope": "market"},
+        {"name": "MetaTrader 5 / Rico", "status": "PAPER_OPTIONAL", "scope": "broker"},
     ]
+
+
+@app.get("/api/broker/connection")
+def broker_connection() -> dict[str, object]:
+    """Return safe MT5 connectivity state; never returns credentials."""
+    return get_mt5_broker().status()
 
 
 @app.get("/api/news/status")
@@ -338,6 +347,94 @@ def create_paper_order(payload: PaperOrderCreate, request: Request, db: Session 
 @app.get("/api/paper/orders", response_model=list[PaperOrderOut])
 def list_paper_orders(db: Session = Depends(get_db)) -> list[PaperOrder]:
     return list(db.scalars(select(PaperOrder).order_by(PaperOrder.created_at.desc())))
+
+
+@app.post("/api/signals", response_model=TradingSignalOut, status_code=201)
+def create_signal(payload: TradingSignalCreate, db: Session = Depends(get_db)) -> TradingSignal:
+    agent = db.get(Agent, payload.agent_id)
+    if agent is None or agent.status != "ACTIVE":
+        raise HTTPException(404, "Active agent not found")
+    action = payload.action.upper().strip()
+    symbol = payload.symbol.upper().strip()
+    if action not in {"BUY", "SELL", "HOLD"}:
+        raise HTTPException(422, "Action must be BUY, SELL or HOLD")
+    if not symbol or len(symbol) > 24 or not payload.reason.strip():
+        raise HTTPException(422, "Symbol and reason are required")
+    if not 0 <= payload.confidence <= 1:
+        raise HTTPException(422, "Confidence must be between 0 and 1")
+    if payload.position_size < 0 or (action != "HOLD" and payload.position_size <= 0):
+        raise HTTPException(422, "Position size must be positive for BUY/SELL")
+    if action != "HOLD" and (payload.stop_loss is None or payload.take_profit is None):
+        raise HTTPException(422, "BUY/SELL signals require stop loss and take profit")
+    signal = TradingSignal(agent_id=agent.id, symbol=symbol, action=action, confidence=payload.confidence, reason=payload.reason.strip(), risk=payload.risk.upper(), entry_min=payload.entry_min, entry_max=payload.entry_max, stop_loss=payload.stop_loss, take_profit=payload.take_profit, position_size=payload.position_size, expires_at=payload.expires_at, status="RECEIVED")
+    db.add(signal)
+    db.add(AuditLog(action="SIGNAL_CREATED", actor=agent.unique_id, result="RECEIVED"))
+    db.commit()
+    db.refresh(signal)
+    return signal
+
+
+@app.get("/api/signals", response_model=list[TradingSignalOut])
+def list_signals(limit: int = 50, db: Session = Depends(get_db)) -> list[TradingSignal]:
+    bounded_limit = min(max(limit, 1), 200)
+    return list(db.scalars(select(TradingSignal).order_by(TradingSignal.created_at.desc()).limit(bounded_limit)))
+
+
+@app.post("/api/signals/{signal_id}/execute", response_model=ExecutionRecordOut)
+def execute_signal(signal_id: int, request: Request, db: Session = Depends(get_db)) -> ExecutionRecord:
+    signal = db.get(TradingSignal, signal_id)
+    if signal is None:
+        raise HTTPException(404, "Signal not found")
+    if signal.status not in {"RECEIVED", "BLOCKED_NO_QUOTE", "BLOCKED_RISK"}:
+        raise HTTPException(409, "Signal is not available for execution")
+    if signal.action == "HOLD":
+        raise HTTPException(409, "HOLD signals do not create orders")
+    try:
+        record = ExecutionEngine().execute(db, signal, request.state.request_id)
+        db.commit()
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(503, str(exc)) from exc
+    db.refresh(record)
+    return record
+
+
+@app.get("/api/risk/allocations")
+def risk_allocations(db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    rows = list(db.scalars(select(AgentAllocation).order_by(AgentAllocation.agent_id)))
+    return [{"agent_id": row.agent_id, "allocation_percent": float(row.allocation_percent), "max_position_percent": float(row.max_position_percent), "enabled": row.enabled} for row in rows]
+
+
+@app.put("/api/risk/allocations/{agent_id}")
+def update_risk_allocation(agent_id: int, payload: AllocationUpdate, db: Session = Depends(get_db)) -> dict[str, object]:
+    if db.get(Agent, agent_id) is None:
+        raise HTTPException(404, "Agent not found")
+    if not 0 <= payload.allocation_percent <= 100 or not 0 < payload.max_position_percent <= 100:
+        raise HTTPException(422, "Allocation limits are invalid")
+    others = sum(float(row.allocation_percent) for row in db.scalars(select(AgentAllocation).where(AgentAllocation.agent_id != agent_id)))
+    if others + payload.allocation_percent > 100 - settings.risk_reserve_percent:
+        raise HTTPException(409, "Allocations must preserve the configured reserve")
+    allocation = db.scalar(select(AgentAllocation).where(AgentAllocation.agent_id == agent_id))
+    if allocation is None:
+        allocation = AgentAllocation(agent_id=agent_id)
+        db.add(allocation)
+    allocation.allocation_percent = payload.allocation_percent
+    allocation.max_position_percent = payload.max_position_percent
+    allocation.enabled = payload.enabled
+    db.add(AuditLog(action="RISK_ALLOCATION_UPDATED", actor="operator", result="UPDATED"))
+    db.commit()
+    return {"agent_id": agent_id, "allocation_percent": payload.allocation_percent, "max_position_percent": payload.max_position_percent, "enabled": payload.enabled, "reserve_percent": settings.risk_reserve_percent}
+
+
+@app.get("/api/executions", response_model=list[ExecutionRecordOut])
+def execution_records(limit: int = 50, db: Session = Depends(get_db)) -> list[ExecutionRecord]:
+    bounded_limit = min(max(limit, 1), 200)
+    return list(db.scalars(select(ExecutionRecord).order_by(ExecutionRecord.created_at.desc()).limit(bounded_limit)))
+
+
+@app.get("/api/signals/{signal_id}/risk", response_model=RiskDecisionOut | None)
+def signal_risk(signal_id: int, db: Session = Depends(get_db)) -> RiskDecision | None:
+    return db.scalar(select(RiskDecision).where(RiskDecision.signal_id == signal_id).order_by(RiskDecision.created_at.desc()))
 
 
 @app.post("/api/paper/orders/{order_id}/execute", response_model=PaperOrderOut)
